@@ -1,43 +1,46 @@
 import NextAuth from "next-auth";
-
-import GoogleProvider from "next-auth/providers/google";
-import GithubProvider from "next-auth/providers/github";
-
-import { DrizzleAdapter } from "@auth/drizzle-adapter";
+import Credentials from "next-auth/providers/credentials";
+import { eq } from "drizzle-orm";
 import { db } from "@/drizzle";
-import {
-  users,
-  accounts,
-  sessions,
-  verificationTokens,
-  authenticators,
-} from "@/drizzle/schema";
-
-import type { Adapter } from "next-auth/adapters";
+import { usersTable } from "@/drizzle/schema";
+import { compare } from "bcryptjs";
 
 const handler = NextAuth({
-  secret: process.env.NEXTAUTH_SECRET as string,
-  adapter: DrizzleAdapter(db, {
-    usersTable: users,
-    accountsTable: accounts,
-    sessionsTable: sessions,
-    verificationTokensTable: verificationTokens,
-    authenticatorsTable: authenticators,
-  }) as Adapter,
+  session: {
+    strategy: "jwt",
+  },
+  pages: {
+    signIn: "/signin",
+    newUser: "/signup",
+  },
   providers: [
-    GithubProvider({
-      clientId: process.env.GITHUB_ID as string,
-      clientSecret: process.env.GITHUB_SECRET as string,
-    }),
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID as string,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+    Credentials({
+      credentials: {
+        email: {},
+        password: {},
+      },
+      authorize: async (credentials) => {
+        const email = credentials?.email;
+        const password = credentials?.password;
+
+        if (!email || !password)
+          return Promise.reject("error: credentials not provided");
+
+        const user = await db.query.usersTable.findFirst({
+          where: eq(usersTable.email, credentials?.password),
+        });
+
+        if (!user) return Promise.reject("error: specified user not exists");
+
+        const isPasswordValid = await compare(password, user.password);
+
+        if (isPasswordValid)
+          return Promise.reject("error: specified user not exists");
+
+        return user;
+      },
     }),
   ],
-  pages: {
-    newUser: "/signup",
-    signIn: "/signin",
-  },
 });
 
 export { handler as GET, handler as POST };
